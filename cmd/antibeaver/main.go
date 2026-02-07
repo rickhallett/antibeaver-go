@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/fatih/color"
 	"github.com/rickhallett/antibeaver/internal/db"
 	"github.com/rickhallett/antibeaver/internal/synthesis"
 	"github.com/spf13/cobra"
@@ -17,7 +18,55 @@ var (
 	outputJSON bool
 	agentID    string
 	priority   string
+	noColor    bool
 )
+
+// Tokyo Night color palette
+var (
+	tokyoPurple  = color.New(color.FgHiMagenta)
+	tokyoBlue    = color.New(color.FgHiCyan)
+	tokyoGreen   = color.New(color.FgHiGreen)
+	tokyoYellow  = color.New(color.FgHiYellow)
+	tokyoRed     = color.New(color.FgHiRed)
+	tokyoOrange  = color.New(color.FgYellow)
+	tokyoMuted   = color.New(color.FgWhite)
+	tokyoBold    = color.New(color.FgHiWhite, color.Bold)
+	tokyoDim     = color.New(color.FgHiBlack)
+)
+
+const banner = `
+   ╔═══════════════════════════════════════════════════════════╗
+   ║                                                           ║
+   ║     ░█▀█░█▀█░▀█▀░▀█▀░█▀▄░█▀▀░█▀█░█░█░█▀▀░█▀▄             ║
+   ║     ░█▀█░█░█░░█░░░█░░█▀▄░█▀▀░█▀█░▀▄▀░█▀▀░█▀▄             ║
+   ║     ░▀░▀░▀░▀░░▀░░▀▀▀░▀▀░░▀▀▀░▀░▀░░▀░░▀▀▀░▀░▀             ║
+   ║                                                           ║
+   ║           🦫  dam the flood  •  v%s               ║
+   ║                                                           ║
+   ╚═══════════════════════════════════════════════════════════╝
+`
+
+const bannerCompact = `
+  ┌─────────────────────────────────────────┐
+  │  🦫 antibeaver v%s                  │
+  │     traffic governance for agents       │
+  └─────────────────────────────────────────┘
+`
+
+func printBanner() {
+	if outputJSON || noColor {
+		return
+	}
+	tokyoPurple.Printf(banner, version)
+	fmt.Println()
+}
+
+func printCompactBanner() {
+	if outputJSON || noColor {
+		return
+	}
+	tokyoBlue.Printf(bannerCompact, version)
+}
 
 func main() {
 	rootCmd := &cobra.Command{
@@ -27,11 +76,22 @@ func main() {
 through circuit breaking, message buffering, and thought coalescing.
 
 Dam it.`,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			if noColor {
+				color.NoColor = true
+			}
+		},
+		Run: func(cmd *cobra.Command, args []string) {
+			printBanner()
+			tokyoMuted.Println("  Use 'antibeaver --help' for available commands")
+			fmt.Println()
+		},
 	}
 
 	// Global flags
 	rootCmd.PersistentFlags().StringVar(&dbPath, "db", defaultDBPath(), "Path to SQLite database")
 	rootCmd.PersistentFlags().BoolVar(&outputJSON, "json", false, "Output as JSON")
+	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colors")
 
 	// Add commands
 	rootCmd.AddCommand(statusCmd())
@@ -106,16 +166,46 @@ func statusCmd() *cobra.Command {
 				return enc.Encode(out)
 			}
 
-			status := "NORMAL"
+			printCompactBanner()
+			fmt.Println()
+
+			// Status line
 			if result.Buffering {
-				status = "BUFFERING"
+				tokyoYellow.Print("  ⚡ Status: ")
+				tokyoOrange.Printf("BUFFERING")
+				tokyoDim.Printf(" (%s)\n", result.Reason)
+			} else {
+				tokyoGreen.Print("  ✓ Status: ")
+				tokyoBold.Print("NORMAL")
+				tokyoDim.Printf(" (%s)\n", result.Reason)
 			}
 
-			fmt.Printf("Status: %s (%s)\n", status, result.Reason)
-			fmt.Printf("Pending: %d thoughts\n", pending)
-			if halted {
-				fmt.Println("⚠️  SYSTEM HALTED")
+			// Pending
+			tokyoBlue.Print("  ◆ Pending: ")
+			if pending > 0 {
+				tokyoYellow.Printf("%d thoughts\n", pending)
+			} else {
+				tokyoMuted.Println("0 thoughts")
 			}
+
+			// Latency
+			tokyoBlue.Print("  ◆ Latency: ")
+			tokyoMuted.Printf("avg %dms / max %dms", avgLatency, maxLatency)
+			tokyoDim.Printf(" (threshold: %dms)\n", state.Threshold)
+
+			// Warnings
+			if halted {
+				fmt.Println()
+				tokyoRed.Println("  ⚠️  SYSTEM HALTED")
+			}
+			if forced {
+				tokyoOrange.Println("  ⚡ Forced buffering enabled")
+			}
+			if simulated > 0 {
+				tokyoPurple.Printf("  🔮 Simulated latency: %dms\n", simulated)
+			}
+
+			fmt.Println()
 			return nil
 		},
 	}
@@ -162,7 +252,9 @@ func bufferCmd() *cobra.Command {
 				return enc.Encode(out)
 			}
 
-			fmt.Printf("Buffered thought (id: %d, priority: %s)\n", id, p)
+			tokyoGreen.Print("  ✓ ")
+			tokyoMuted.Print("Buffered thought ")
+			tokyoDim.Printf("(id: %d, priority: %s, agent: %s)\n", id, p, agentID)
 			return nil
 		},
 	}
@@ -190,16 +282,18 @@ func flushCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				if len(agents) == 0 {
+					tokyoDim.Println("  No pending thoughts to flush")
+					return nil
+				}
 				for _, a := range agents {
 					thoughts, _ := d.GetPendingThoughts(a)
 					if len(thoughts) > 0 {
+						tokyoPurple.Printf("\n  ═══ Agent: %s ═══\n\n", a)
 						prompt := synthesis.GeneratePrompt(thoughts)
-						fmt.Printf("=== Agent: %s ===\n%s\n\n", a, prompt)
+						fmt.Println(prompt)
 						d.MarkSynthesized(a, prompt)
 					}
-				}
-				if len(agents) == 0 {
-					fmt.Println("No pending thoughts to flush")
 				}
 				return nil
 			}
@@ -210,7 +304,7 @@ func flushCmd() *cobra.Command {
 			}
 
 			if len(thoughts) == 0 {
-				fmt.Println("No pending thoughts for agent:", agentID)
+				tokyoDim.Printf("  No pending thoughts for agent: %s\n", agentID)
 				return nil
 			}
 
@@ -218,6 +312,7 @@ func flushCmd() *cobra.Command {
 			fmt.Println(prompt)
 
 			d.MarkSynthesized(agentID, prompt)
+			tokyoGreen.Printf("\n  ✓ Synthesized %d thoughts\n", len(thoughts))
 			return nil
 		},
 	}
@@ -240,7 +335,8 @@ func haltCmd() *cobra.Command {
 			defer d.Close()
 
 			d.SetHalted(true)
-			fmt.Println("⚠️  System HALTED — all messages will be buffered")
+			tokyoRed.Println("  ⚠️  System HALTED")
+			tokyoMuted.Println("     All messages will be buffered until resume")
 			return nil
 		},
 	}
@@ -261,7 +357,8 @@ func resumeCmd() *cobra.Command {
 			d.SetForcedBuffering(false)
 			d.SetSimulatedLatency(0)
 
-			fmt.Println("✅ System RESUMED — normal operations restored")
+			tokyoGreen.Println("  ✓ System RESUMED")
+			tokyoMuted.Println("    Normal operations restored")
 			return nil
 		},
 	}
@@ -291,9 +388,12 @@ func simulateCmd() *cobra.Command {
 			d.SetSimulatedLatency(ms)
 
 			if ms == 0 {
-				fmt.Println("Simulated latency cleared")
+				tokyoGreen.Println("  ✓ Simulated latency cleared")
 			} else {
-				fmt.Printf("Simulated latency set to %dms\n", ms)
+				tokyoPurple.Printf("  🔮 Simulated latency set to %dms\n", ms)
+				if ms > 5000 {
+					tokyoOrange.Println("     ⚡ This will trigger buffering")
+				}
 			}
 			return nil
 		},
@@ -330,7 +430,7 @@ func recordLatencyCmd() *cobra.Command {
 				return enc.Encode(out)
 			}
 
-			fmt.Printf("Recorded latency: %dms\n", ms)
+			tokyoBlue.Printf("  ◆ Recorded latency: %dms\n", ms)
 			return nil
 		},
 	}
@@ -348,7 +448,8 @@ func forceCmd() *cobra.Command {
 			defer d.Close()
 
 			d.SetForcedBuffering(true)
-			fmt.Println("⚡ Forced buffering ENABLED")
+			tokyoOrange.Println("  ⚡ Forced buffering ENABLED")
+			tokyoMuted.Println("     Use 'antibeaver resume' to clear")
 			return nil
 		},
 	}
@@ -359,7 +460,12 @@ func versionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Show version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("antibeaver v%s\n", version)
+			if outputJSON {
+				fmt.Printf(`{"version":"%s"}`+"\n", version)
+				return
+			}
+			tokyoPurple.Printf("  🦫 antibeaver v%s\n", version)
+			tokyoDim.Println("     traffic governance for multi-agent systems")
 		},
 	}
 }
