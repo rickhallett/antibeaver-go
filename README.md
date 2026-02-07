@@ -11,7 +11,8 @@
   <a href="#installation">Installation</a> •
   <a href="#usage">Usage</a> •
   <a href="#commands">Commands</a> •
-  <a href="#integration">Integration</a>
+  <a href="#integration">Integration</a> •
+  <a href="https://tools.oceanheart.ai">all tools</a>
 </p>
 
 ---
